@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>資料庫期末專題_交友配對</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background-color: #f0f2f5; height: 100vh; display: flex; flex-direction: column; }
+        .navbar { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); flex-shrink: 0; }
+        .navbar-brand { color: white !important; font-weight: bold; }
+        
+        .main-container { flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; padding-top: 20px; }
+        .nav-pills .nav-link { border-radius: 50px; padding: 8px 20px; margin: 0 5px; background: white; color: #555; }
+        .nav-pills .nav-link.active { background-color: #764ba2; color: white; }
+        .tab-content { flex-grow: 1; overflow-y: auto; padding-bottom: 20px; }
+        
+        /* 卡片興趣標籤 */
+        .interest-badge { font-size: 0.75rem; background-color: #e2e6ea; color: #555; padding: 3px 8px; border-radius: 10px; margin-right: 3px; display: inline-block; margin-bottom: 3px;}
+
+        /* 聊天室樣式 */
+        .chat-layout { display: flex; height: 100%; border: 1px solid #ddd; border-radius: 15px; background: white; overflow: hidden; }
+        .chat-list { width: 30%; border-right: 1px solid #eee; overflow-y: auto; background: #f8f9fa; }
+        .chat-item { padding: 15px; cursor: pointer; border-bottom: 1px solid #eee; transition: 0.2s; }
+        .chat-item:hover, .chat-item.active { background: #e9ecef; }
+        .chat-room { width: 70%; display: flex; flex-direction: column; background: white; }
+        .chat-messages { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .message-bubble { max-width: 70%; padding: 10px 15px; border-radius: 20px; font-size: 0.95rem; }
+        .msg-mine { align-self: flex-end; background-color: #764ba2; color: white; border-bottom-right-radius: 5px; }
+        .msg-other { align-self: flex-start; background-color: #f1f0f0; color: #333; border-bottom-left-radius: 5px; }
+        .chat-input-area { padding: 15px; border-top: 1px solid #eee; display: flex; gap: 10px; background: #fff; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg">
+        <div class="container">
+            <a class="navbar-brand" href="#"><i class="fas fa-paper-plane me-2"></i>LinkUp</a>
+            <span class="text-white-50">User: Alice (ID: 1)</span>
+        </div>
+    </nav>
+
+    <div class="container main-container">
+        <ul class="nav nav-pills justify-content-center mb-3" id="pills-tab" role="tablist">
+            <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#pills-people"><i class="fas fa-user-friends me-2"></i>找朋友</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#pills-events" onclick="loadEvents()"><i class="fas fa-calendar-alt me-2"></i>找活動</button></li>
+            <li class="nav-item"><button class="nav-link" id="tab-chat" data-bs-toggle="pill" data-bs-target="#pills-chat" onclick="loadChatList()"><i class="fas fa-comments me-2"></i>聊天室</button></li>
+        </ul>
+
+        <div class="tab-content h-100" id="pills-tabContent">
+            <div class="tab-pane fade show active" id="pills-people">
+                <div id="user-list" class="row g-4 pb-5"></div>
+            </div>
+            <div class="tab-pane fade" id="pills-events">
+                <div id="event-list" class="row g-4 pb-5"></div>
+            </div>
+            <div class="tab-pane fade h-100" id="pills-chat">
+                <div class="chat-layout shadow-sm" style="height: 600px;">
+                    <div class="chat-list" id="chat-friends-list"><p class="text-center text-muted mt-4">載入中...</p></div>
+                    <div class="chat-room">
+                        <div class="chat-messages" id="chat-box"><div class="text-center text-muted mt-5">請從左側選擇一位好友開始聊天</div></div>
+                        <div class="chat-input-area">
+                            <input type="text" id="msg-input" class="form-control" placeholder="輸入訊息..." disabled>
+                            <button class="btn btn-primary" id="btn-send" disabled onclick="sendMessage()"><i class="fas fa-paper-plane"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const currentUserId = 1; 
+        let currentRoomId = null;
+
+        // ================= 找朋友 (含興趣 & 封鎖) =================
+        async function loadUsers() {
+            // 呼叫 API 時帶上現在的使用者 ID，後端才能過濾黑名單
+            const res = await fetch(`/api/users?current_user_id=${currentUserId}`);
+            const users = await res.json();
+            const container = document.getElementById('user-list');
+            container.innerHTML = '';
+            
+            if(users.length === 0) {
+                container.innerHTML = '<p class="text-center w-100 text-muted">目前沒有可顯示的使用者 (可能都被你封鎖了？)</p>';
+                return;
+            }
+
+            users.forEach(u => {
+                const avatar = `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.user_name}`;
+                let interestsHtml = '';
+                u.interests.forEach(i => {
+                    interestsHtml += `<span class="interest-badge">#${i}</span>`;
+                });
+
+                container.innerHTML += `
+                    <div class="col-md-3">
+                        <div class="card h-100 shadow-sm border-0">
+                            <img src="${avatar}" class="card-img-top p-3" style="height:150px;object-fit:contain;background:#f8f9fa">
+                            <div class="card-body text-center">
+                                <h5 class="fw-bold">${u.user_name}</h5>
+                                <div class="mb-2">${interestsHtml}</div>
+                                <p class="text-muted small">${u.bio}</p>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-sm btn-outline-secondary w-50" onclick="blockUser(${u.user_id}, '${u.user_name}')"><i class="fas fa-ban"></i> 封鎖</button>
+                                    <button class="btn btn-sm btn-outline-danger w-50" onclick="likeUser(${u.user_id}, '${u.user_name}')"><i class="far fa-heart"></i> Like</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+            });
+        }
+
+        async function blockUser(targetId, name) {
+            if(!confirm(`確定要封鎖 ${name} 嗎？\n封鎖後你們將無法看到彼此。`)) return;
+
+            const res = await fetch('/api/block', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({blocker_id: currentUserId, blocked_id: targetId})
+            });
+            const data = await res.json();
+            alert(data.message);
+            loadUsers(); // 重新整理列表，該使用者應該會消失
+        }
+
+        async function likeUser(targetId, name) {
+            const res = await fetch('/api/matches/like', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({source_id: currentUserId, target_id: targetId})
+            });
+            const data = await res.json();
+            if (data.status === 'matched') {
+                alert(`🎉 配對成功！你和 ${name} 現在可以開始聊天了！`);
+                document.getElementById('tab-chat').click();
+                setTimeout(loadChatList, 500);
+            } else {
+                alert(`👍 已送出喜歡給 ${name}`);
+            }
+        }
+
+        // ================= 找活動 =================
+        async function loadEvents() {
+            try {
+                const res = await fetch('/api/events');
+                const events = await res.json();
+                const container = document.getElementById('event-list');
+                container.innerHTML = '';
+                events.forEach(e => {
+                    const date = new Date(e.event_date).toLocaleDateString();
+                    container.innerHTML += `
+                        <div class="col-md-4">
+                            <div class="card h-100 border-0 shadow-sm">
+                                <div class="card-body">
+                                    <div class="badge bg-primary mb-2">${date}</div>
+                                    <h5 class="fw-bold">${e.title}</h5>
+                                    <p class="text-muted small">發起人: ${e.creator_name}</p>
+                                    <p>${e.description}</p>
+                                    <button class="btn btn-sm btn-dark w-100" onclick="joinEvent(${e.event_id})">我要報名</button>
+                                </div>
+                            </div>
+                        </div>`;
+                });
+            } catch (err) {}
+        }
+
+        async function joinEvent(eid) {
+            await fetch('/api/events/join', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({user_id: currentUserId, event_id: eid})
+            });
+            alert('報名處理完成！');
+        }
+
+        // ================= 聊天室 =================
+        async function loadChatList() {
+            const res = await fetch(`/api/my_matches?user_id=${currentUserId}`);
+            const matches = await res.json();
+            const list = document.getElementById('chat-friends-list');
+            list.innerHTML = '';
+            if(matches.length === 0) {
+                list.innerHTML = '<p class="text-center text-muted mt-4">還沒有配對成功的好友</p>'; return;
+            }
+            matches.forEach(m => {
+                list.innerHTML += `<div class="chat-item" onclick="openChat(${m.room_id}, '${m.friend_name}', this)"><div class="fw-bold">${m.friend_name}</div><div class="text-muted small">點擊開始聊天</div></div>`;
+            });
+        }
+
+        async function openChat(roomId, friendName, element) {
+            currentRoomId = roomId;
+            document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
+            document.getElementById('msg-input').disabled = false;
+            document.getElementById('btn-send').disabled = false;
+            document.getElementById('msg-input').focus();
+            const res = await fetch(`/api/messages?room_id=${roomId}`);
+            const msgs = await res.json();
+            const box = document.getElementById('chat-box');
+            box.innerHTML = `<div class="text-center text-muted small mb-3">與 ${friendName} 的聊天室</div>`;
+            msgs.forEach(msg => {
+                const isMine = msg.sender_id === currentUserId;
+                box.innerHTML += `<div class="message-bubble ${isMine ? 'msg-mine' : 'msg-other'}">${msg.content}</div>`;
+            });
+            box.scrollTop = box.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('msg-input');
+            if(!input.value || !currentRoomId) return;
+            await fetch('/api/messages', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({room_id: currentRoomId, sender_id: currentUserId, content: input.value})
+            });
+            input.value = '';
+            const activeItem = document.querySelector('.chat-item.active');
+            openChat(currentRoomId, activeItem.querySelector('.fw-bold').innerText, activeItem);
+        }
+
+        loadUsers();
+    </script>
+</body>
+</html>
